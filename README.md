@@ -1,6 +1,14 @@
 # github-vec
 
-Semantic search over 2.3M GitHub READMEs using vector embeddings.
+GitHub READMEs, vectorized.
+
+> Ever searched GitHub for a project you *knew* existed but couldn't find?
+>
+> You remember the concept, maybe a few keywords, but GitHub search returns nothing.
+
+I got frustrated enough to embed 2.3M GitHub READMEs into a vector database. Now you can search by *meaning*, not just keywords.
+
+Designed to work with claude-code subagents, keeping contexts lean.
 
 ## Setup
 
