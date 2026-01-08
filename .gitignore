@@ -1,0 +1,8 @@
+node_modules
+bun.lock
+data/
+storage/
+snapshots/
+.env
+.env.*
+.DS_Store

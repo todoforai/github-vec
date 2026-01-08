@@ -1,0 +1,14 @@
+{
+  "name": "github-vec",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
+    "@qdrant/js-client-rest": "^1.16.2",
+    "p-map": "^7.0.4"
+  }
+}
