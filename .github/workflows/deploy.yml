@@ -1,0 +1,41 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend deps
+        run: cd frontend && bun install
+
+      - name: Build frontend
+        run: cd frontend && bun run build
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy frontend
+        run: |
+          rsync -avz --delete frontend/dist/ root@${{ secrets.SSH_HOST }}:/var/www/github-vec/dist/
+
+      - name: Deploy backend
+        run: |
+          rsync -avz --delete backend/ root@${{ secrets.SSH_HOST }}:/var/www/github-vec/backend/
+
+      - name: Install backend deps & restart
+        run: |
+          ssh root@${{ secrets.SSH_HOST }} "cd /var/www/github-vec/backend && bun install && (pkill -f 'bun.*index.ts' || true) && nohup bun run index.ts > /var/log/github-vec.log 2>&1 &"
