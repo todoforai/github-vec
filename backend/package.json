@@ -1,0 +1,10 @@
+{
+  "name": "github-vec-backend",
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.16.2"
+  }
+}
