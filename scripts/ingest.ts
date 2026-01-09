@@ -10,6 +10,7 @@ interface GitHubReadme {
   content_hash: string;
   repo_name: string;
   content: string;
+  last_commit?: number;
 }
 
 const BATCH_SIZE = 50;
@@ -60,7 +61,7 @@ async function processBatch(readmes: GitHubReadme[]) {
     points: readmes.map((r, i) => ({
       id: sha1ToUuid(r.content_hash),
       vector: vectors[i]!,
-      payload: { repo_name: r.repo_name, content: r.content.slice(0, MAX_CONTENT_LEN), content_hash: r.content_hash },
+      payload: { repo_name: r.repo_name, content: r.content.slice(0, MAX_CONTENT_LEN), content_hash: r.content_hash, last_commit: r.last_commit },
     })),
   });
 

@@ -7,13 +7,16 @@ const QUERY = `
   SELECT
     c.id as content_hash,
     ANY_VALUE(f.repo_name) as repo_name,
-    ANY_VALUE(c.content) as content
+    ANY_VALUE(c.content) as content,
+    MAX(cm.committer.date.seconds) as last_commit
   FROM \`bigquery-public-data.github_repos.files\` f
   JOIN \`bigquery-public-data.github_repos.contents\` c ON f.id = c.id
+  LEFT JOIN \`bigquery-public-data.github_repos.commits\` cm ON f.repo_name IN UNNEST(cm.repo_name)
   WHERE LOWER(f.path) = 'readme.md'
     AND c.content IS NOT NULL
     AND c.binary = false
   GROUP BY c.id
+  ORDER BY last_commit DESC NULLS LAST
 `;
 
 const dest = process.argv[2] || ".";
@@ -35,10 +38,11 @@ for await (const row of job.getQueryResultsStream()) {
   writer.write(line);
   bytes += line.length;
   count++;
+  console.log(`${count}: ${row.repo_name}`);
   if (count % 10000 === 0) {
     const elapsed = (Date.now() - start) / 1000;
     const mbps = (bytes / 1024 / 1024 / elapsed).toFixed(2);
-    console.log(`${count.toLocaleString()} rows, ${(bytes / 1024 / 1024).toFixed(0)} MB, ${mbps} MB/s`);
+    console.log(`--- ${count.toLocaleString()} rows, ${(bytes / 1024 / 1024).toFixed(0)} MB, ${mbps} MB/s ---`);
   }
 }
 
