@@ -34,8 +34,8 @@ jobs:
 
       - name: Deploy backend
         run: |
-          rsync -avz --delete backend/ root@${{ secrets.SSH_HOST }}:/var/www/github-vec/backend/
+          rsync -avz --delete --exclude='.env' --exclude='node_modules' backend/ root@${{ secrets.SSH_HOST }}:/var/www/github-vec/backend/
 
       - name: Install backend deps & restart
         run: |
-          ssh root@${{ secrets.SSH_HOST }} "cd /var/www/github-vec/backend && bun install && (pkill -f 'bun.*index.ts' || true) && nohup bun run index.ts > /var/log/github-vec.log 2>&1 &"
+          ssh root@${{ secrets.SSH_HOST }} "cd /var/www/github-vec/backend && bun install && systemctl restart github-vec"
