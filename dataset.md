@@ -147,6 +147,39 @@ for f in os.listdir('./origins'):
             urls.append(url)
 ```
 
+### Filter by recent activity
+```bash
+# Download origin_visit table and filter to repos active in last year
+python scripts/filter-by-activity.py \
+    --dataset 2023-09-06-popular-6k \
+    --days 365 \
+    --github-only \
+    --download \
+    --output /tmp/active-origins.txt
+```
+
+```python
+# Or manually with pyarrow
+import pyarrow.orc as orc
+import pyarrow as pa
+import pandas as pd
+import os
+
+# Load origin_visit ORC files
+tables = []
+for f in os.listdir('/tmp/origin_visit'):
+    tables.append(orc.read_table(f'/tmp/origin_visit/{f}'))
+df = pa.concat_tables(tables).to_pandas()
+
+# Filter to last year
+cutoff = df['date'].max() - pd.Timedelta(days=365)
+recent = df[df['date'] >= cutoff]
+active_origins = set(recent['origin'].unique())
+
+# Filter to GitHub only
+github_active = {o for o in active_origins if o.startswith('https://github.com/')}
+```
+
 ## Our Pipeline
 
 1. Download origins from popular-6k subset
