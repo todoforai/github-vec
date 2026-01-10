@@ -1,6 +1,7 @@
 node_modules
 bun.lock
 data/
+readmes/
 storage/
 snapshots/
 .env
