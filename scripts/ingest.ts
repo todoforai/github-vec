@@ -10,6 +10,7 @@ import {
   listBatches,
   getBatchStatus,
   downloadBatchResults,
+  BudgetExhaustedError,
   type Provider,
   type EmbedItem,
   type NebiusBatchStatus,
@@ -44,9 +45,9 @@ const EMBED_WORKERS = 48;
 const BUFFER_MAX = Math.floor(1.5 * EMBED_WORKERS * BATCH_SIZE);
 const MAX_CONTENT_LEN = 16000;
 
-// Nebius batch chunking: --chunk=N (default 50000), --parallel=N (default 3)
+// Nebius batch chunking: --chunk=N (default 25000), --parallel=N (default 3)
 const chunkFlag = process.argv.find((a) => a.startsWith("--chunk="));
-const BATCH_CHUNK_SIZE = chunkFlag ? parseInt(chunkFlag.split("=")[1]) : 50000;
+const BATCH_CHUNK_SIZE = chunkFlag ? parseInt(chunkFlag.split("=")[1]) : 25000;
 const parallelFlag = process.argv.find((a) => a.startsWith("--parallel="));
 const BATCH_PARALLEL = parallelFlag ? parseInt(parallelFlag.split("=")[1]) : 3;
 
@@ -345,8 +346,8 @@ async function resumePendingBatches(itemsMap: Map<string, ReadmeItem>): Promise<
 
   console.log(`[nebius-batch] Found ${batchIds.length} batch(es) in state file, checking status...`);
 
-  // First pass: check all statuses, handle completed/failed, collect pending
-  const pendingBatches: string[] = [];
+  // First pass: check all statuses, categorize batches
+  const toProcess: { batchId: string; fileId?: string }[] = [];
 
   for (const batchId of batchIds) {
     const batchState = state[batchId];
@@ -354,9 +355,51 @@ async function resumePendingBatches(itemsMap: Map<string, ReadmeItem>): Promise<
     console.log(`[nebius-batch] ${batchId.slice(-8)}: ${status.status}`);
 
     if (status.status === "completed" && status.output_file_id) {
-      // Download and upsert immediately
-      console.log(`[nebius-batch] Downloading results for ${batchId.slice(-8)}...`);
-      const { results, failed } = await downloadBatchResults(status.output_file_id, API_KEYS[0]);
+      toProcess.push({ batchId, fileId: status.output_file_id });
+      batchState.itemIds.forEach((id) => processedIds.add(id));
+    } else if (status.status === "in_progress" || status.status === "validating") {
+      toProcess.push({ batchId }); // No fileId = needs polling
+      batchState.itemIds.forEach((id) => processedIds.add(id));
+    } else {
+      console.log(`[nebius-batch] ${batchId.slice(-8)} ${status.status}, removing from state`);
+      delete state[batchId];
+      await saveBatchState(state);
+    }
+  }
+
+  if (toProcess.length === 0) {
+    return processedIds;
+  }
+
+  // Process all batches in parallel (download completed, poll pending)
+  console.log(`[nebius-batch] Processing ${toProcess.length} batch(es) in parallel...`);
+
+  await pMap(
+    toProcess,
+    async ({ batchId, fileId }) => {
+      let results: Map<string, number[]>;
+      let failed: { id: string; error: string }[];
+      let cost = 0;
+
+      if (fileId) {
+        // Already completed - just download
+        console.log(`[nebius-batch] Downloading ${batchId.slice(-8)}...`);
+        const downloaded = await downloadBatchResults(fileId, API_KEYS[0]);
+        results = downloaded.results;
+        failed = downloaded.failed;
+      } else {
+        // Still pending - poll then download
+        const result = await pollBatchJob(batchId, API_KEYS[0], 30000, (id, completed) => {
+          batchProgress.set(id, completed);
+          const total = [...batchProgress.values()].reduce((a, b) => a + b, 0);
+          const elapsed = (Date.now() - startTime) / 1000;
+          console.log(`[progress] ${total.toLocaleString()} | ${id.slice(-8)} | ${completed} | ${(total / elapsed).toFixed(1)}/s | $${globalCost.toFixed(2)}`);
+        });
+        results = result.results;
+        failed = result.failed;
+        cost = result.cost;
+        globalCost += cost;
+      }
 
       for (const f of failed) {
         const item = itemsMap.get(f.id);
@@ -378,61 +421,7 @@ async function resumePendingBatches(itemsMap: Map<string, ReadmeItem>): Promise<
         });
       }
 
-      console.log(`[nebius-batch] ${batchId.slice(-8)} done, upserted ${toUpsert.length} items`);
-      batchState.itemIds.forEach((id) => processedIds.add(id));
-      delete state[batchId];
-      await saveBatchState(state);
-    } else if (status.status === "in_progress" || status.status === "validating") {
-      pendingBatches.push(batchId);
-      batchState.itemIds.forEach((id) => processedIds.add(id));
-    } else {
-      console.log(`[nebius-batch] ${batchId.slice(-8)} ${status.status}, removing from state`);
-      delete state[batchId];
-      await saveBatchState(state);
-    }
-  }
-
-  if (pendingBatches.length === 0) {
-    return processedIds;
-  }
-
-  // Poll all pending batches in parallel
-  console.log(`[nebius-batch] Polling ${pendingBatches.length} pending batch(es) in parallel...`);
-
-  await pMap(
-    pendingBatches,
-    async (batchId) => {
-      const batchState = state[batchId];
-      const result = await pollBatchJob(batchId, API_KEYS[0], 30000, (id, completed) => {
-        batchProgress.set(id, completed);
-        const total = [...batchProgress.values()].reduce((a, b) => a + b, 0);
-        const elapsed = (Date.now() - startTime) / 1000;
-        console.log(`[progress] ${total.toLocaleString()} | ${id.slice(-8)} | ${completed} | ${(total / elapsed).toFixed(1)}/s | $${globalCost.toFixed(2)}`);
-      });
-
-      globalCost += result.cost;
-
-      for (const f of result.failed) {
-        const item = itemsMap.get(f.id);
-        console.error(`[nebius-batch] FAILED ${item?.repo_name || f.id}: ${f.error}`);
-      }
-      if (result.failed.length > 0) {
-        console.warn(`[nebius-batch] ${result.failed.length} items failed, ${result.results.size} succeeded`);
-      }
-
-      const toUpsert = [...result.results.entries()].filter(([id]) => itemsMap.has(id));
-      for (let i = 0; i < toUpsert.length; i += 100) {
-        const batch = toUpsert.slice(i, i + 100);
-        await qdrant.upsert(COLLECTION, {
-          wait: false,
-          points: batch.map(([id, vector]) => {
-            const item = itemsMap.get(id)!;
-            return { id, vector, payload: { repo_name: item.repo_name, content: item.content, content_hash: item.content_hash } };
-          }),
-        });
-      }
-
-      console.log(`[nebius-batch] ${batchId.slice(-8)} done, upserted ${toUpsert.length} | $${result.cost.toFixed(4)}`);
+      console.log(`[nebius-batch] ${batchId.slice(-8)} done, upserted ${toUpsert.length}${cost ? ` | $${cost.toFixed(4)}` : ""}`);
       delete state[batchId];
       await saveBatchState(state);
     },
@@ -596,4 +585,12 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  if (err instanceof BudgetExhaustedError) {
+    console.log("\n[!] Budget exhausted. State saved - will resume on next run.");
+    console.log("    Add funds and re-run the script to continue.");
+    process.exit(0);
+  }
+  console.error(err);
+  process.exit(1);
+});

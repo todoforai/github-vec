@@ -1,5 +1,13 @@
 import { unlinkSync } from "fs";
 
+// === Errors ===
+export class BudgetExhaustedError extends Error {
+  constructor(message: string = "Budget exhausted") {
+    super(message);
+    this.name = "BudgetExhaustedError";
+  }
+}
+
 // === Types ===
 export interface EmbedResult {
   embeddings: number[][];
@@ -191,27 +199,53 @@ export interface BatchDownloadResult {
 }
 
 export async function downloadBatchResults(fileId: string, apiKey: string): Promise<BatchDownloadResult> {
-  const content = await downloadResults(fileId, apiKey);
-  const results = new Map<string, number[]>();
-  const failed: { id: string; error: string }[] = [];
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    const row = JSON.parse(line) as NebiusBatchResultRow;
-    if (!row.response?.data?.[0]?.embedding) {
-      failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
-      continue;
-    }
-    results.set(row.custom_id, row.response.data[0].embedding);
-  }
-  return { results, failed };
-}
-
-async function downloadResults(fileId: string, apiKey: string): Promise<string> {
   const res = await nebiusRequest(`/files/${fileId}/content`, apiKey);
   if (!res.ok) {
-    throw new Error(`Failed to download results: ${res.status} ${await res.text()}`);
+    const text = await res.text();
+    if (res.status === 402) {
+      throw new BudgetExhaustedError(text);
+    }
+    throw new Error(`Failed to download results: ${res.status} ${text}`);
   }
-  return res.text();
+
+  const results = new Map<string, number[]>();
+  const failed: { id: string; error: string }[] = [];
+
+  // Stream line by line to avoid memory issues with large files
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!; // Keep incomplete line in buffer
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const row = JSON.parse(line) as NebiusBatchResultRow;
+      if (!row.response?.data?.[0]?.embedding) {
+        failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
+        continue;
+      }
+      results.set(row.custom_id, row.response.data[0].embedding);
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.trim()) {
+    const row = JSON.parse(buffer) as NebiusBatchResultRow;
+    if (!row.response?.data?.[0]?.embedding) {
+      failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
+    } else {
+      results.set(row.custom_id, row.response.data[0].embedding);
+    }
+  }
+
+  return { results, failed };
 }
 
 // Submit batch, returns batch ID (use for tracking)
@@ -253,20 +287,52 @@ export async function pollBatchJob(
   if (!status.output_file_id) throw new Error("No output file ID");
 
   console.log(`[nebius-batch] Downloading results...`);
-  const outputContent = await downloadResults(status.output_file_id, apiKey);
+  const res = await nebiusRequest(`/files/${status.output_file_id}/content`, apiKey);
+  if (!res.ok) {
+    const text = await res.text();
+    if (res.status === 402) {
+      throw new BudgetExhaustedError(text);
+    }
+    throw new Error(`Failed to download results: ${res.status} ${text}`);
+  }
 
   const results = new Map<string, number[]>();
   const failed: { id: string; error: string }[] = [];
   let totalTokens = 0;
-  for (const line of outputContent.split("\n")) {
-    if (!line.trim()) continue;
-    const row = JSON.parse(line) as NebiusBatchResultRow;
+
+  // Stream line by line to avoid memory issues with large files
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!;
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const row = JSON.parse(line) as NebiusBatchResultRow;
+      if (!row.response?.data?.[0]?.embedding) {
+        failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
+        continue;
+      }
+      results.set(row.custom_id, row.response.data[0].embedding);
+      totalTokens += row.response.usage?.prompt_tokens || 0;
+    }
+  }
+
+  if (buffer.trim()) {
+    const row = JSON.parse(buffer) as NebiusBatchResultRow;
     if (!row.response?.data?.[0]?.embedding) {
       failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
-      continue;
+    } else {
+      results.set(row.custom_id, row.response.data[0].embedding);
+      totalTokens += row.response.usage?.prompt_tokens || 0;
     }
-    results.set(row.custom_id, row.response.data[0].embedding);
-    totalTokens += row.response.usage?.prompt_tokens || 0;
   }
 
   const cost = (totalTokens / 1_000_000) * PRICING["nebius-batch"];

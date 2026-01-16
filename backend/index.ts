@@ -4,6 +4,76 @@ import { embed } from "./embed";
 const COLLECTION = "github_readmes_qwen_4k";
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333" });
 
+// Rate limiting config
+const ANON_LIMIT = 10; // requests per minute
+const WINDOW_MS = 60_000; // 1 minute
+
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+const validApiKeys = new Set(
+  (process.env.API_KEYS || "").split(",").filter(Boolean)
+);
+
+interface RateLimitResult {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  resetAt: number;
+}
+
+function checkRateLimit(req: Request): RateLimitResult {
+  const apiKey = req.headers.get("X-API-Key");
+
+  // API key users bypass rate limit
+  if (apiKey && validApiKeys.has(apiKey)) {
+    return { allowed: true, limit: -1, remaining: -1, resetAt: 0 };
+  }
+
+  // Get client IP from X-Forwarded-For (behind proxy) or fallback
+  const forwarded = req.headers.get("X-Forwarded-For");
+  const ip = forwarded ? forwarded.split(",")[0].trim() : "unknown";
+
+  const now = Date.now();
+  const limit = rateLimits.get(ip);
+
+  // New window or expired
+  if (!limit || now > limit.resetAt) {
+    const resetAt = now + WINDOW_MS;
+    rateLimits.set(ip, { count: 1, resetAt });
+    return { allowed: true, limit: ANON_LIMIT, remaining: ANON_LIMIT - 1, resetAt };
+  }
+
+  // Check if over limit
+  if (limit.count >= ANON_LIMIT) {
+    return { allowed: false, limit: ANON_LIMIT, remaining: 0, resetAt: limit.resetAt };
+  }
+
+  limit.count++;
+  return { allowed: true, limit: ANON_LIMIT, remaining: ANON_LIMIT - limit.count, resetAt: limit.resetAt };
+}
+
+function rateLimitHeaders(rl: RateLimitResult): Record<string, string> {
+  if (rl.limit === -1) return {}; // API key user, no headers
+  return {
+    "X-RateLimit-Limit": String(rl.limit),
+    "X-RateLimit-Remaining": String(rl.remaining),
+    "X-RateLimit-Reset": String(Math.floor(rl.resetAt / 1000)),
+  };
+}
+
+function rateLimitedResponse(rl: RateLimitResult): Response {
+  const retryAfter = Math.ceil((rl.resetAt - Date.now()) / 1000);
+  return Response.json(
+    { error: "Rate limit exceeded. Use an API key for higher limits." },
+    {
+      status: 429,
+      headers: {
+        ...rateLimitHeaders(rl),
+        "Retry-After": String(Math.max(1, retryAfter)),
+      },
+    }
+  );
+}
+
 interface SearchResult {
   score: number;
   repo: string;
@@ -34,37 +104,36 @@ async function search(query: string, limit: number, includeContent: boolean): Pr
 Bun.serve({
   port: process.env.PORT || 5555,
 
-  routes: {
-    "/search": async (req) => {
-      const url = new URL(req.url);
+  async fetch(req) {
+    const url = new URL(req.url);
+    const path = url.pathname;
+
+    // Health check - no rate limit
+    if (path === "/health") {
+      return Response.json({ status: "ok" });
+    }
+
+    // Rate limit check for all other endpoints
+    const rl = checkRateLimit(req);
+    if (!rl.allowed) {
+      return rateLimitedResponse(rl);
+    }
+
+    const headers = rateLimitHeaders(rl);
+
+    if (path === "/search" || path === "/search/full") {
       const q = url.searchParams.get("q");
       const limit = parseInt(url.searchParams.get("limit") || "10");
 
       if (!q) {
-        return Response.json({ error: "Missing ?q= parameter" }, { status: 400 });
+        return Response.json({ error: "Missing ?q= parameter" }, { status: 400, headers });
       }
 
-      const results = await search(q, limit, false);
-      return Response.json({ query: q, results });
-    },
+      const includeContent = path === "/search/full";
+      const results = await search(q, limit, includeContent);
+      return Response.json({ query: q, results }, { headers });
+    }
 
-    "/search/full": async (req) => {
-      const url = new URL(req.url);
-      const q = url.searchParams.get("q");
-      const limit = parseInt(url.searchParams.get("limit") || "10");
-
-      if (!q) {
-        return Response.json({ error: "Missing ?q= parameter" }, { status: 400 });
-      }
-
-      const results = await search(q, limit, true);
-      return Response.json({ query: q, results });
-    },
-
-    "/health": () => Response.json({ status: "ok" }),
-  },
-
-  fetch(req) {
     return Response.json({ error: "Not found" }, { status: 404 });
   },
 });
