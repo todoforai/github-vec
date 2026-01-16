@@ -3,7 +3,7 @@ if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY required");
 
 const MODEL = "qwen/qwen3-embedding-8b";
 const ENDPOINT = "https://openrouter.ai/api/v1/embeddings";
-const EMBEDDING_DIM = 1536;
+const EMBEDDING_DIM = 4096;
 
 interface OpenRouterEmbedResponse {
   data: { embedding: number[]; index: number }[];

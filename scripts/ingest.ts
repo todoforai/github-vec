@@ -50,7 +50,7 @@ const BATCH_CHUNK_SIZE = chunkFlag ? parseInt(chunkFlag.split("=")[1]) : 50000;
 const parallelFlag = process.argv.find((a) => a.startsWith("--parallel="));
 const BATCH_PARALLEL = parallelFlag ? parseInt(parallelFlag.split("=")[1]) : 3;
 
-const COLLECTION = "github_readmes_qwen";
+const COLLECTION = "github_readmes_qwen_4k";
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333" });
 
 // Batch state file to track in-flight batches
@@ -77,6 +77,10 @@ const PRICING: Record<Provider, number> = {
   nebius: 0.01,
   "nebius-batch": 0.005,
 };
+
+// Global progress tracking: batchId -> completed count
+const batchProgress = new Map<string, number>();
+let globalCost = 0;
 
 console.log(`Provider: ${PROVIDER} | Keys: ${API_KEYS.length}${PROVIDER === "nebius-batch" ? ` | Chunk: ${BATCH_CHUNK_SIZE} | Parallel: ${BATCH_PARALLEL}` : ""}`);
 
@@ -137,7 +141,9 @@ async function fetchExistingIds(): Promise<Set<string>> {
 // === Load all items to embed ===
 async function loadItems(files: string[], existingIds: Set<string>): Promise<ReadmeItem[]> {
   const items: ReadmeItem[] = [];
-  let skipped = 0;
+  const seenIds = new Set<string>();
+  let existing = 0;
+  let duplicates = 0;
   let processed = 0;
 
   await pMap(
@@ -152,9 +158,14 @@ async function loadItems(files: string[], existingIds: Set<string>): Promise<Rea
 
       processed++;
       if (existingIds.has(id)) {
-        skipped++;
+        existing++;
         return;
       }
+      if (seenIds.has(id)) {
+        duplicates++;
+        return;
+      }
+      seenIds.add(id);
 
       items.push({
         id,
@@ -164,13 +175,13 @@ async function loadItems(files: string[], existingIds: Set<string>): Promise<Rea
       });
 
       if (processed % 1000 === 0) {
-        console.log(`[load] ${processed}/${files.length} | ${items.length} to embed | ${skipped} skipped`);
+        console.log(`[load] ${processed}/${files.length} | ${items.length} new | ${existing} existing | ${duplicates} dupes`);
       }
     },
     { concurrency: FILE_READERS }
   );
 
-  console.log(`[load] done: ${items.length} to embed, ${skipped} skipped`);
+  console.log(`[load] done: ${items.length} new, ${existing} existing, ${duplicates} dupes`);
   return items;
 }
 
@@ -322,7 +333,8 @@ async function runRealtimePipeline(items: ReadmeItem[]): Promise<void> {
 
 // === Resume pending batches from state file ===
 async function resumePendingBatches(itemsMap: Map<string, ReadmeItem>): Promise<Set<string>> {
-  const state = await loadBatchState();
+  const startTime = Date.now();
+  let state = await loadBatchState();
   const batchIds = Object.keys(state);
   const processedIds = new Set<string>();
 
@@ -333,21 +345,30 @@ async function resumePendingBatches(itemsMap: Map<string, ReadmeItem>): Promise<
 
   console.log(`[nebius-batch] Found ${batchIds.length} batch(es) in state file, checking status...`);
 
+  // First pass: check all statuses, handle completed/failed, collect pending
+  const pendingBatches: string[] = [];
+
   for (const batchId of batchIds) {
     const batchState = state[batchId];
-    console.log(`[nebius-batch] Checking batch ${batchId} (${batchState.itemIds.length} items)...`);
-
     const status = await getBatchStatus(batchId, API_KEYS[0]);
-    console.log(`[nebius-batch] ${batchId}: ${status.status}`);
+    console.log(`[nebius-batch] ${batchId.slice(-8)}: ${status.status}`);
 
     if (status.status === "completed" && status.output_file_id) {
-      // Download and upsert
-      console.log(`[nebius-batch] Downloading results for ${batchId}...`);
-      const results = await downloadBatchResults(status.output_file_id, API_KEYS[0]);
+      // Download and upsert immediately
+      console.log(`[nebius-batch] Downloading results for ${batchId.slice(-8)}...`);
+      const { results, failed } = await downloadBatchResults(status.output_file_id, API_KEYS[0]);
+
+      for (const f of failed) {
+        const item = itemsMap.get(f.id);
+        console.error(`[nebius-batch] FAILED ${item?.repo_name || f.id}: ${f.error}`);
+      }
+      if (failed.length > 0) {
+        console.warn(`[nebius-batch] ${failed.length} items failed, ${results.size} succeeded`);
+      }
 
       const toUpsert = [...results.entries()].filter(([id]) => itemsMap.has(id));
-      for (let i = 0; i < toUpsert.length; i += 1000) {
-        const batch = toUpsert.slice(i, i + 1000);
+      for (let i = 0; i < toUpsert.length; i += 100) {
+        const batch = toUpsert.slice(i, i + 100);
         await qdrant.upsert(COLLECTION, {
           wait: false,
           points: batch.map(([id, vector]) => {
@@ -357,21 +378,66 @@ async function resumePendingBatches(itemsMap: Map<string, ReadmeItem>): Promise<
         });
       }
 
-      console.log(`[nebius-batch] Batch ${batchId} done, upserted ${toUpsert.length} items`);
+      console.log(`[nebius-batch] ${batchId.slice(-8)} done, upserted ${toUpsert.length} items`);
       batchState.itemIds.forEach((id) => processedIds.add(id));
       delete state[batchId];
       await saveBatchState(state);
     } else if (status.status === "in_progress" || status.status === "validating") {
-      // Still pending - mark items as in-flight
-      console.log(`[nebius-batch] Batch ${batchId} still pending, will poll...`);
+      pendingBatches.push(batchId);
       batchState.itemIds.forEach((id) => processedIds.add(id));
     } else {
-      // Failed/expired/cancelled - remove from state, will retry
-      console.log(`[nebius-batch] Batch ${batchId} ${status.status}, removing from state`);
+      console.log(`[nebius-batch] ${batchId.slice(-8)} ${status.status}, removing from state`);
       delete state[batchId];
       await saveBatchState(state);
     }
   }
+
+  if (pendingBatches.length === 0) {
+    return processedIds;
+  }
+
+  // Poll all pending batches in parallel
+  console.log(`[nebius-batch] Polling ${pendingBatches.length} pending batch(es) in parallel...`);
+
+  await pMap(
+    pendingBatches,
+    async (batchId) => {
+      const batchState = state[batchId];
+      const result = await pollBatchJob(batchId, API_KEYS[0], 30000, (id, completed) => {
+        batchProgress.set(id, completed);
+        const total = [...batchProgress.values()].reduce((a, b) => a + b, 0);
+        const elapsed = (Date.now() - startTime) / 1000;
+        console.log(`[progress] ${total.toLocaleString()} | ${id.slice(-8)} | ${completed} | ${(total / elapsed).toFixed(1)}/s | $${globalCost.toFixed(2)}`);
+      });
+
+      globalCost += result.cost;
+
+      for (const f of result.failed) {
+        const item = itemsMap.get(f.id);
+        console.error(`[nebius-batch] FAILED ${item?.repo_name || f.id}: ${f.error}`);
+      }
+      if (result.failed.length > 0) {
+        console.warn(`[nebius-batch] ${result.failed.length} items failed, ${result.results.size} succeeded`);
+      }
+
+      const toUpsert = [...result.results.entries()].filter(([id]) => itemsMap.has(id));
+      for (let i = 0; i < toUpsert.length; i += 100) {
+        const batch = toUpsert.slice(i, i + 100);
+        await qdrant.upsert(COLLECTION, {
+          wait: false,
+          points: batch.map(([id, vector]) => {
+            const item = itemsMap.get(id)!;
+            return { id, vector, payload: { repo_name: item.repo_name, content: item.content, content_hash: item.content_hash } };
+          }),
+        });
+      }
+
+      console.log(`[nebius-batch] ${batchId.slice(-8)} done, upserted ${toUpsert.length} | $${result.cost.toFixed(4)}`);
+      delete state[batchId];
+      await saveBatchState(state);
+    },
+    { concurrency: BATCH_PARALLEL }
+  );
 
   return processedIds;
 }
@@ -414,14 +480,6 @@ async function runBatchPipeline(items: ReadmeItem[]): Promise<void> {
   let totalEmbedded = 0;
   let chunksCompleted = 0;
 
-  // Aggregate progress: batchId -> completed count
-  const batchProgress = new Map<string, number>();
-  const logProgress = () => {
-    const total = [...batchProgress.values()].reduce((a, b) => a + b, 0);
-    const elapsed = (Date.now() - startTime) / 1000;
-    console.log(`[progress] ${total.toLocaleString()} items | ${(total / elapsed).toFixed(1)} items/s`);
-  };
-
   // Load current state
   let state = await loadBatchState();
 
@@ -447,15 +505,31 @@ async function runBatchPipeline(items: ReadmeItem[]): Promise<void> {
       // Poll until complete
       const result = await pollBatchJob(batchId, API_KEYS[0], 30000, (id, completed) => {
         batchProgress.set(id, completed);
-        logProgress();
+        const total = [...batchProgress.values()].reduce((a, b) => a + b, 0);
+        const elapsed = (Date.now() - startTime) / 1000;
+        console.log(`[progress] ${total.toLocaleString()} | ${id.slice(-8)} | ${completed} | ${(total / elapsed).toFixed(1)}/s | $${globalCost.toFixed(2)}`);
       });
 
+      globalCost += result.cost;
+
+      // Log failed items with repo names
+      const chunkMap = new Map(chunk.map((r) => [r.id, r]));
+      for (const f of result.failed) {
+        const item = chunkMap.get(f.id);
+        console.error(`[C${chunkId}] FAILED ${item?.repo_name || f.id}: ${f.error}`);
+      }
+      if (result.failed.length > 0) {
+        console.warn(`[C${chunkId}] ${result.failed.length} items failed, ${result.results.size} succeeded`);
+      }
+
       // Upsert results to Qdrant
-      console.log(`[C${chunkId}] Upserting ${result.results.size} vectors...`);
+      console.log(`[C${chunkId}] Upserting ${result.results.size} vectors | $${result.cost.toFixed(4)}`);
 
       const itemsWithVectors = chunk.filter((r) => result.results.has(r.id));
-      for (let i = 0; i < itemsWithVectors.length; i += 1000) {
-        const batch = itemsWithVectors.slice(i, i + 1000);
+
+      // Upsert in batches of 100 to stay under Qdrant 32MB payload limit
+      for (let i = 0; i < itemsWithVectors.length; i += 100) {
+        const batch = itemsWithVectors.slice(i, i + 100);
         await qdrant.upsert(COLLECTION, {
           wait: false,
           points: batch.map((r) => ({

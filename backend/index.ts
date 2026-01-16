@@ -1,7 +1,7 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { embed } from "./embed";
 
-const COLLECTION = "github_readmes_qwen";
+const COLLECTION = "github_readmes_qwen_4k";
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333" });
 
 interface SearchResult {

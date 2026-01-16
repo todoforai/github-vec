@@ -14,6 +14,7 @@ export interface EmbedItem {
 
 export interface BatchEmbedResult {
   results: Map<string, number[]>; // id -> embedding
+  failed: { id: string; error: string }[];
   tokens: number;
   cost: number;
 }
@@ -21,7 +22,7 @@ export interface BatchEmbedResult {
 export type Provider = "deepinfra" | "nebius" | "nebius-batch";
 
 // === Config ===
-export const EMBEDDING_DIM = 1536;
+export const EMBEDDING_DIM = 4096;
 
 const PRICING: Record<Provider, number> = {
   deepinfra: 0.005,      // $0.005/1M tokens (batch endpoint)
@@ -184,15 +185,25 @@ export async function listBatches(apiKey: string): Promise<NebiusBatchStatus[]> 
   return data.data;
 }
 
-export async function downloadBatchResults(fileId: string, apiKey: string): Promise<Map<string, number[]>> {
+export interface BatchDownloadResult {
+  results: Map<string, number[]>;
+  failed: { id: string; error: string }[];
+}
+
+export async function downloadBatchResults(fileId: string, apiKey: string): Promise<BatchDownloadResult> {
   const content = await downloadResults(fileId, apiKey);
   const results = new Map<string, number[]>();
+  const failed: { id: string; error: string }[] = [];
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     const row = JSON.parse(line) as NebiusBatchResultRow;
+    if (!row.response?.data?.[0]?.embedding) {
+      failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
+      continue;
+    }
     results.set(row.custom_id, row.response.data[0].embedding);
   }
-  return results;
+  return { results, failed };
 }
 
 async function downloadResults(fileId: string, apiKey: string): Promise<string> {
@@ -245,16 +256,21 @@ export async function pollBatchJob(
   const outputContent = await downloadResults(status.output_file_id, apiKey);
 
   const results = new Map<string, number[]>();
+  const failed: { id: string; error: string }[] = [];
   let totalTokens = 0;
   for (const line of outputContent.split("\n")) {
     if (!line.trim()) continue;
     const row = JSON.parse(line) as NebiusBatchResultRow;
+    if (!row.response?.data?.[0]?.embedding) {
+      failed.push({ id: row.custom_id, error: JSON.stringify(row.response || row).slice(0, 200) });
+      continue;
+    }
     results.set(row.custom_id, row.response.data[0].embedding);
     totalTokens += row.response.usage?.prompt_tokens || 0;
   }
 
   const cost = (totalTokens / 1_000_000) * PRICING["nebius-batch"];
-  return { results, tokens: totalTokens, cost };
+  return { results, failed, tokens: totalTokens, cost };
 }
 
 // Convenience: submit + poll in one call
