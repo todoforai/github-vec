@@ -1,8 +1,9 @@
 import { Glob } from "bun";
 import { createHash } from "crypto";
 
-const outputPath = "./data/readmes.jsonl";
-const readmesDir = "./readmes";
+const DATA_DIR = process.env.DATA_DIR || "/home/root/data";
+const outputPath = `${DATA_DIR}/readmes.jsonl`;
+const readmesDir = `${DATA_DIR}/readmes`;
 
 const glob = new Glob("*");
 const files = await Array.fromAsync(glob.scan(readmesDir));

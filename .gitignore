@@ -7,3 +7,5 @@ snapshots/
 .env
 .env.*
 .DS_Store
+proxies.txt
+__pycache__/
