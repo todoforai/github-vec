@@ -24,7 +24,28 @@ qdrant                  # Start Qdrant server (in separate terminal)
 bun scripts/ingest.ts   # Ingest READMEs into Qdrant
 ```
 
-Requires `OPENROUTER_API_KEY` env var for embeddings.
+Requires:
+- `DEEPINFRA_API_KEY` - for embeddings
+- `DATA_DIR` - path to data directory (default: `/home/root/data`)
+
+## Qdrant Servers
+
+| Server | URL | Description |
+|--------|-----|-------------|
+| Local | `http://localhost:6333` | Default development instance |
+| Production | `http://db.todofor.ai:6333` | Remote production instance |
+
+To ingest to production:
+
+```bash
+QDRANT_URL="http://db.todofor.ai:6333" bun scripts/ingest.ts
+```
+
+To sync local storage to production (stops remote Qdrant, rsyncs, restarts):
+
+```bash
+./scripts/sync-qdrant.sh
+```
 
 ## Data
 

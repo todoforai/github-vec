@@ -347,22 +347,14 @@ export default function App() {
         </div>
         {showLanding && <SearchSuggestions onSearch={setQuery} />}
         {showLanding && (
-          <div className="mt-8 p-4 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 text-center">
-            <p className="text-red-600 dark:text-red-400 font-semibold">
-              The database is 6-7 years old.
+          <div className="mt-8 p-4 rounded-lg border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/30 text-center">
+            <p className="text-yellow-700 dark:text-yellow-400 font-semibold">
+              Database update in progress
             </p>
-            <p className="text-red-600/80 dark:text-red-400/80 text-sm mt-2">
-              The search works well and finds relevant repos, but not new ones.<br />
-              Please help me get the <span className="font-bold">latest GitHub READMEs</span> so this is actually useful.
+            <p className="text-yellow-600/80 dark:text-yellow-400/80 text-sm mt-2">
+              We're indexing 300M+ GitHub repositories. Current results may be incomplete.<br />
+              Follow progress on <a href="https://x.com/HavlikTamas" target="_blank" rel="noopener noreferrer" className="underline font-medium">@HavlikTamas</a>
             </p>
-            <a
-              href="https://x.com/HavlikTamas"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 mt-3 text-red-700 dark:text-red-300 font-medium underline hover:text-red-900 dark:hover:text-red-100"
-            >
-              Contact @HavlikTamas
-            </a>
           </div>
         )}
       </div>

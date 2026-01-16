@@ -8,20 +8,21 @@ const CONCURRENCY = 1500;
 const MAX_RETRIES = 3;
 
 const BRANCHES = ["main", "master"];
-// Ordered by frequency (top 12 cover 99%+ of repos)
+// Ordered by frequency - README.md covers 89% of repos
 const README_NAMES = [
-  "README.md",       // 33593
-  "readme.md",       // 1047
-  "README.rst",      // 721
-  "README",          // 587
-  "Readme.md",       // 359
-  "README.markdown", // 222
-  "README.txt",      // 181
-  "README.adoc",     // 111
-  "readme.txt",      // 108
-  "README.MD",       // 106
-  "README.rdoc",     // 96
-  "ReadMe.md",       // 69
+  "README.md",       // 70% master + 19% main = 89%
+  // Uncomment below for broader coverage (~11% more):
+  // "readme.md",       // 1047
+  // "README.rst",      // 721
+  // "README",          // 587
+  // "Readme.md",       // 359
+  // "README.markdown", // 222
+  // "README.txt",      // 181
+  // "README.adoc",     // 111
+  // "readme.txt",      // 108
+  // "README.MD",       // 106
+  // "README.rdoc",     // 96
+  // "ReadMe.md",       // 69
 ];
 
 interface Stats {
@@ -178,7 +179,10 @@ async function fetchAndSave(
 
 
   if (!result.content) {
-    const statusKey = String(result.status);
+    // For 404s, include count of README names tested (e.g. 404_1, 404_12)
+    const statusKey = result.status === 404
+      ? `404_${README_NAMES.length}`
+      : String(result.status);
     const statusDir = `${errorsDir}/${statusKey}`;
     if (!stats.createdDirs.has(statusKey)) {
       await Bun.$`mkdir -p ${statusDir}`.quiet();
