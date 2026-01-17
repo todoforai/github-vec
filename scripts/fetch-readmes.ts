@@ -4,10 +4,15 @@ import { parseArgs } from "util";
 
 const MIN_SIZE = 500;
 const MAX_CHARS = 50000;
-const CONCURRENCY = 1500;
-const MAX_RETRIES = 3;
+const CONCURRENCY = 3000;
+const MAX_RETRIES = 5;
+const TIMEOUT = 10000;
+const BAD_PROXY_PENALTY = 15000;
 
-const BRANCHES = ["main", "master"];
+let activeConnections = 0;
+let penalizedCount = 0;
+
+const BRANCHES = ["master", "main"];  // master is 70%, main is 19%
 // Ordered by frequency - README.md covers 89% of repos
 const README_NAMES = [
   "README.md",       // 70% master + 19% main = 89%
@@ -34,48 +39,81 @@ interface Stats {
   processed: number;
   fetched: number;  // actual fetch attempts (non-skipped)
   createdDirs: Set<string>;
+  totalFetchTime: number;
+  totalWriteTime: number;
 }
 
 class ProxyPool {
-  private proxies: string[] = [];
+  private urls: string[] = [];
+  private times: number[] = [];
+  private indexMap: Map<string, number> = new Map(); // url -> index for O(1) lookup
 
   async load(proxyFile: string) {
     const content = await Bun.file(proxyFile).text();
     for (const line of content.trim().split("\n")) {
       const parts = line.trim().split(":");
+      let url: string;
       if (parts.length === 4) {
         const [ip, port, user, pwd] = parts;
-        this.proxies.push(`http://${user}:${pwd}@${ip}:${port}`);
+        url = `http://${user}:${pwd}@${ip}:${port}`;
       } else if (parts.length === 2) {
         const [ip, port] = parts;
-        this.proxies.push(`http://${ip}:${port}`);
+        url = `http://${ip}:${port}`;
+      } else {
+        continue;
+      }
+      if (!this.indexMap.has(url)) {
+        this.indexMap.set(url, this.urls.length);
+        this.urls.push(url);
+        this.times.push(1000); // initial estimate 1s
       }
     }
-    if (this.proxies.length > 0) {
-      console.log(`Loaded ${this.proxies.length} proxies`);
-    }
+    console.log(`Loaded ${proxyFile}: ${this.urls.length} total proxies`);
   }
 
+  // Power of Two Choices: pick 2 random, return faster one
   get(): string | null {
-    if (this.proxies.length === 0) return null;
-    return this.proxies[Math.floor(Math.random() * this.proxies.length)];
+    const len = this.urls.length;
+    if (len === 0) return null;
+
+    const i1 = Math.floor(Math.random() * len);
+    let i2 = Math.floor(Math.random() * len);
+    if (i2 === i1) i2 = (i2 + 1) % len;
+
+    return this.times[i1] <= this.times[i2] ? this.urls[i1] : this.urls[i2];
+  }
+
+  // Update average response time (exponential moving average)
+  report(url: string, timeMs: number) {
+    const idx = this.indexMap.get(url);
+    if (idx !== undefined) {
+      this.times[idx] = this.times[idx] * 0.8 + timeMs * 0.2;
+    }
   }
 }
 
 
 async function fetchWithRetry(
   url: string,
-  proxy: string | null,
+  proxyPool: ProxyPool,
   repo: string
 ): Promise<{ response: Response | null; error: string | null }> {
   let lastErr: string | null = null;
 
   for (let retry = 0; retry < MAX_RETRIES; retry++) {
+    const proxy = proxyPool.get(); // Fresh proxy each attempt
+    const start = Date.now();
+    activeConnections++;
+
     try {
       const response = await fetch(url, {
         proxy: proxy ?? undefined,
-        timeout: 30000,
+        timeout: TIMEOUT,
       } as any);
+      activeConnections--;
+
+      // Report timing on success
+      if (proxy) proxyPool.report(proxy, Date.now() - start);
 
       if ([429, 500, 502, 503, 504].includes(response.status)) {
         const wait = 2 ** retry;
@@ -85,11 +123,16 @@ async function fetchWithRetry(
       }
       return { response, error: null };
     } catch (e: any) {
+      activeConnections--;
+      // Report slow time on failure (penalize bad proxy)
+      if (proxy) {
+        proxyPool.report(proxy, BAD_PROXY_PENALTY);
+        penalizedCount++;
+      }
+
       lastErr = `${e.name}: ${e.message}`;
       if (retry < MAX_RETRIES - 1) {
-        const wait = 2 ** retry;
-        await Bun.sleep(wait * 1000);
-        continue;
+        continue; // Try next proxy immediately, no wait
       }
       console.log(`\n[ERR] ${repo}: ${lastErr}`);
       return { response: null, error: lastErr };
@@ -107,12 +150,11 @@ interface FetchResult {
 
 async function tryRawFetch(repo: string, proxyPool: ProxyPool): Promise<FetchResult> {
   let lastStatus = 404;
-  const proxy = proxyPool.get();
 
   for (const readme of README_NAMES) {
     for (const branch of BRANCHES) {
       const url = `https://raw.githubusercontent.com/${repo}/${branch}/${readme}`;
-      const { response, error } = await fetchWithRetry(url, proxy, repo);
+      const { response, error } = await fetchWithRetry(url, proxyPool, repo);
 
       if (error) {
         lastStatus = 0;
@@ -172,10 +214,10 @@ async function fetchAndSave(
   const fetchStart = Date.now();
   const result = await tryRawFetch(repo, proxyPool);
   const fetchTime = Date.now() - fetchStart;
-  if (verbose) {
-    console.log(`[TIME] ${(fetchTime/1000).toFixed(1)}s status=${result.status} len=${result.content ? result.content.length : 0} ${repo}`);
-  }
   stats.processed++;
+
+  // Time the write operation
+  const writeStart = Date.now();
 
 
   if (!result.content) {
@@ -208,14 +250,23 @@ async function fetchAndSave(
     await Bun.write(`${outputDir}/${outFile}`, content);
     stats.success++;
   }
+  const writeTime = Date.now() - writeStart;
+  stats.totalFetchTime += fetchTime;
+  stats.totalWriteTime += writeTime;
+
+  if (verbose) {
+    console.log(`[TIME] fetch=${(fetchTime/1000).toFixed(2)}s write=${(writeTime/1000).toFixed(3)}s status=${result.status} len=${result.content ? result.content.length : 0} ${repo}`);
+  }
 
   // Print progress after all stats updated
   if (stats.processed % 100 === 0) {
+    const avgFetch = stats.fetched > 0 ? stats.totalFetchTime / stats.fetched : 0;
+    const avgWrite = stats.fetched > 0 ? stats.totalWriteTime / stats.fetched : 0;
     const elapsed = (Date.now() - startTime) / 1000;
     const completed = stats.success + stats.tooSmall + Array.from(stats.errors.values()).reduce((a, b) => a + b, 0);
     const rate = elapsed > 0 ? completed / elapsed : 0;
     const errorTotal = Array.from(stats.errors.values()).reduce((a, b) => a + b, 0);
-    process.stdout.write(`\r[${stats.processed}/${total}] fetched:${stats.fetched} ✓${stats.success} ✗${errorTotal} small:${stats.tooSmall} (${rate.toFixed(0)}/s)   `);
+    process.stdout.write(`\r[${stats.processed}/${total}] fetched:${stats.fetched} ✓${stats.success} ✗${errorTotal} small:${stats.tooSmall} (${rate.toFixed(0)}/s) conn:${activeConnections} pen:${penalizedCount} avg:${(avgFetch/1000).toFixed(2)}s   `);
   }
 }
 
@@ -227,7 +278,7 @@ async function main() {
       offset: { type: "string", default: "0" },
       full: { type: "boolean", default: false },
       "min-date": { type: "string" },
-      proxies: { type: "string" },
+      proxies: { type: "string", multiple: true },
       verbose: { type: "boolean", default: false },
     },
   });
@@ -235,15 +286,18 @@ async function main() {
 
   const proxyPool = new ProxyPool();
   if (values.proxies) {
-    await proxyPool.load(values.proxies);
+    for (const proxyFile of values.proxies) {
+      await proxyPool.load(proxyFile);
+    }
   }
 
   const outputDir = process.env.READMES_DIR || "/home/root/data/readmes";
   const errorsDir = `${outputDir}/.errors`;
   await Bun.$`mkdir -p ${outputDir} ${errorsDir}`.quiet();
 
-  // Use DuckDB to stream from parquet
-  const db = new Database(":memory:");
+  // Use DuckDB with persistent file
+  const dbPath = `${outputDir}/.fetch-cache.duckdb`;
+  const db = new Database(dbPath);
   const parquetFile = values.full
     ? "/home/root/data/github_visits_full.parquet"
     : "/home/root/data/github_visits_6k.parquet";
@@ -303,6 +357,8 @@ async function main() {
     processed: 0,
     fetched: 0,
     createdDirs: new Set(),
+    totalFetchTime: 0,
+    totalWriteTime: 0,
   };
   const startTime = Date.now();
 
@@ -313,16 +369,73 @@ async function main() {
     await fetchAndSave(url, outputDir, errorsDir, proxyPool, stats, total, startTime, existingRepos, errorRepos, verbose);
   };
 
-  // Process in batches - query DuckDB in chunks
+  // Create indexed table for fast offset queries
+  const tableName = `urls_${minDate.replace(/-/g, "_")}`;
+
+  // Check if table already exists
+  const tableExists = await new Promise<boolean>((resolve, reject) => {
+    db.all(
+      `SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_name = '${tableName}'`,
+      (err, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(Number(rows[0].cnt) > 0);
+      }
+    );
+  });
+
+  if (!tableExists) {
+    console.log(`Creating indexed table ${tableName}...`);
+    await new Promise<void>((resolve, reject) => {
+      db.exec(
+        `CREATE TABLE ${tableName} AS
+         SELECT ROW_NUMBER() OVER () as id, origin
+         FROM '${parquetFile}' WHERE date >= '${minDate}'`,
+        (err) => (err ? reject(err) : resolve())
+      );
+    });
+  } else {
+    console.log(`Using existing table ${tableName}`);
+  }
+
+  // Create progress table
+  await new Promise<void>((resolve, reject) => {
+    db.exec(
+      `CREATE TABLE IF NOT EXISTS progress (table_name TEXT PRIMARY KEY, last_id INTEGER)`,
+      (err) => (err ? reject(err) : resolve())
+    );
+  });
+
+  // Get total count from table
+  const tableCount = await new Promise<number>((resolve, reject) => {
+    db.all(`SELECT COUNT(*) as cnt FROM ${tableName}`, (err, rows: any[]) => {
+      if (err) reject(err);
+      else resolve(Number(rows[0].cnt));
+    });
+  });
+  console.log(`Table ${tableName} has ${tableCount.toLocaleString()} URLs`);
+
+  // Load saved progress or use offset arg
+  const savedProgress = await new Promise<number>((resolve, reject) => {
+    db.all(
+      `SELECT last_id FROM progress WHERE table_name = '${tableName}'`,
+      (err, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(rows.length > 0 ? Number(rows[0].last_id) : 0);
+      }
+    );
+  });
+
+  // Process in batches using indexed id (fast seek, no scan)
   const BATCH_SIZE = 50000;
-  let batchOffset = offset;
-  let remaining = total;
+  let currentId = offset > 0 ? offset : savedProgress;
+  if (savedProgress > 0 && offset === 0) {
+    console.log(`Resuming from saved progress: ${savedProgress.toLocaleString()}`);
+  }
+  const endId = limit ? currentId + limit : tableCount;
 
-  while (remaining > 0) {
-    const batchLimit = Math.min(BATCH_SIZE, remaining);
-    const query = `SELECT origin FROM '${parquetFile}' WHERE date >= '${minDate}' LIMIT ${batchLimit} OFFSET ${batchOffset}`;
-
-    process.stdout.write(`\rLoading batch at offset ${batchOffset.toLocaleString()}...`);
+  while (currentId < endId) {
+    const batchLimit = Math.min(BATCH_SIZE, endId - currentId);
+    const query = `SELECT origin FROM ${tableName} WHERE id > ${currentId} ORDER BY id LIMIT ${batchLimit}`;
 
     const urls = await new Promise<string[]>((resolve, reject) => {
       db.all(query, (err, rows: { origin: string }[]) => {
@@ -333,21 +446,37 @@ async function main() {
 
     if (urls.length === 0) break;
 
+    // Semaphore-style: queue of waiters for free slots
+    let resolveWaiter: (() => void) | null = null;
+
     for (const url of urls) {
       // Wait if at capacity
       while (inFlight.size >= CONCURRENCY) {
-        await Promise.race(inFlight);
+        await new Promise<void>((resolve) => {
+          resolveWaiter = resolve;
+        });
       }
 
       // Start task and track it
       const task = processUrl(url).then(() => {
         inFlight.delete(task);
+        if (resolveWaiter) {
+          resolveWaiter();
+          resolveWaiter = null;
+        }
       });
       inFlight.add(task);
     }
 
-    batchOffset += urls.length;
-    remaining -= urls.length;
+    currentId += urls.length;
+
+    // Save progress
+    await new Promise<void>((resolve, reject) => {
+      db.exec(
+        `INSERT OR REPLACE INTO progress (table_name, last_id) VALUES ('${tableName}', ${currentId})`,
+        (err) => (err ? reject(err) : resolve())
+      );
+    });
   }
 
   // Wait for remaining tasks
