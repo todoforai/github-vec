@@ -1,14 +1,16 @@
 #!/bin/bash
 set -e
 
+HOST="${QDRANT_HOST:?Set QDRANT_HOST env var}"
+
 echo "Stopping remote Qdrant..."
-ssh todoforai "systemctl stop qdrant"
+ssh "$HOST" "systemctl stop qdrant"
 
 echo "Syncing Qdrant storage (this may take a while)..."
-rsync -avz --progress storage/ todoforai:/var/lib/qdrant/storage/
+rsync -avz --progress storage/ "$HOST":/var/lib/qdrant/storage/
 
 echo "Starting remote Qdrant..."
-ssh todoforai "systemctl start qdrant"
+ssh "$HOST" "systemctl start qdrant"
 
 echo "Done! Verifying collections..."
-ssh todoforai "curl -s http://localhost:6333/collections"
+ssh "$HOST" "curl -s http://localhost:6333/collections"
