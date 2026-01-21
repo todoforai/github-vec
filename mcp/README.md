@@ -7,7 +7,7 @@ Semantic search across millions of GitHub repositories.
 ### Claude Code
 
 ```bash
-claude mcp add github-vec -- bun /path/to/github-vec/mcp/index.ts
+claude mcp add github-vec -- bunx --bun github:todoforai/github-vec/mcp
 ```
 
 ### Claude Desktop
@@ -18,8 +18,8 @@ Add to `~/.config/claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "github-vec": {
-      "command": "bun",
-      "args": ["/path/to/github-vec/mcp/index.ts"]
+      "command": "bunx",
+      "args": ["--bun", "github:todoforai/github-vec/mcp"]
     }
   }
 }
