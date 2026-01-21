@@ -4,7 +4,7 @@ import { Search, Sun, Moon, Star, GitFork, Github } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { search, type SearchResult, PAGE_SIZE } from "@/lib/api";
+import { search, getStats, type SearchResult, type Stats, PAGE_SIZE } from "@/lib/api";
 import { fetchRepoInfo, type RepoInfo } from "@/lib/github";
 
 function useTheme() {
@@ -34,6 +34,20 @@ function useDebounce<T>(value: T, delay: number): T {
 function formatNumber(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
   return n.toString();
+}
+
+function formatRepoCount(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1000) return (n / 1000).toFixed(0) + "k";
+  return n.toString();
+}
+
+function useStats() {
+  const [stats, setStats] = useState<Stats | null>(null);
+  useEffect(() => {
+    getStats().then(setStats).catch(() => {});
+  }, []);
+  return stats;
 }
 
 function ResultCard({ result }: { result: SearchResult }) {
@@ -143,7 +157,9 @@ function SearchSuggestions({ onSearch }: { onSearch: (q: string) => void }) {
   );
 }
 
-function Hero() {
+function Hero({ stats }: { stats: Stats | null }) {
+  const repoCount = stats ? formatRepoCount(stats.repos) : "...";
+
   return (
     <div className="border-t">
       {/* Quotes */}
@@ -168,7 +184,7 @@ function Hero() {
 
           {/* Stats */}
           <div className="text-center mb-10">
-            <p className="text-4xl font-bold">2.3M</p>
+            <p className="text-4xl font-bold">{repoCount}</p>
             <p className="text-muted-foreground text-sm mt-1">README files embedded with <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs">qwen3-embedding-8b</code></p>
           </div>
 
@@ -234,14 +250,16 @@ function Hero() {
   );
 }
 
-function HeroHeader() {
+function HeroHeader({ stats }: { stats: Stats | null }) {
+  const repoCount = stats ? formatRepoCount(stats.repos) : "...";
+
   return (
     <div className="text-center mb-6">
       <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent">
         Find repos by meaning
       </h1>
       <p className="text-muted-foreground">
-        Semantic search across 2.3M GitHub repositories
+        Semantic search across {repoCount} GitHub repositories
       </p>
     </div>
   );
@@ -257,6 +275,7 @@ export default function App() {
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [dark, setDark] = useTheme();
   const loaderRef = useRef<HTMLDivElement>(null);
+  const stats = useStats();
 
   const debouncedQuery = useDebounce(query, 300);
 
@@ -333,7 +352,7 @@ export default function App() {
 
       {/* Header + Search */}
       <div className={`max-w-2xl mx-auto px-4 flex flex-col justify-center ${showLanding ? 'min-h-[85vh]' : 'pt-16 pb-8'}`}>
-        {showLanding && <HeroHeader />}
+        {showLanding && <HeroHeader stats={stats} />}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
@@ -360,7 +379,7 @@ export default function App() {
       </div>
 
       {/* Landing sections - full width */}
-      {showLanding && <Hero />}
+      {showLanding && <Hero stats={stats} />}
 
       {/* Results - constrained */}
       {!showLanding && (

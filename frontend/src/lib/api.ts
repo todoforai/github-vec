@@ -16,3 +16,14 @@ export async function search(query: string, limit = PAGE_SIZE): Promise<SearchRe
   if (!res.ok) throw new Error("Search failed");
   return res.json();
 }
+
+export interface Stats {
+  repos: number;
+  cachedAt: string;
+}
+
+export async function getStats(): Promise<Stats> {
+  const res = await fetch("/stats");
+  if (!res.ok) throw new Error("Failed to fetch stats");
+  return res.json();
+}
