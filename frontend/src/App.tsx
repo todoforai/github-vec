@@ -172,8 +172,8 @@ function Hero({ stats }: { stats: Stats | null }) {
           <p className="text-xl italic text-muted-foreground">
             "You remember the concept, maybe a few keywords, but GitHub search returns <span className="text-foreground font-medium">nothing</span>."
           </p>
-          <p className="text-2xl font-semibold bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent pt-4">
-            Stop reinventing. Start finding.
+          <p className="text-lg text-muted-foreground pt-4">
+            I faced the same problem, so I created a vectorized GitHub search. I believe we can find many great ideas and hidden gems — projects that aren't famous yet but already have proper READMEs.
           </p>
         </div>
       </section>
