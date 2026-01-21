@@ -190,9 +190,10 @@ function Hero({ stats }: { stats: Stats | null }) {
           </div>
 
           {/* MCP install */}
-          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-6 overflow-x-auto">
-            <p className="text-slate-500"># Add to Claude Code</p>
+          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-6 overflow-x-auto space-y-2">
+            <p className="text-slate-500"># Add to Claude Code or OpenCode</p>
             <p className="text-green-400">claude mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
+            <p className="text-green-400">opencode mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
           </div>
 
           {/* curl example */}
