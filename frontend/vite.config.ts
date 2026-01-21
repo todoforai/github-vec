@@ -15,6 +15,7 @@ export default defineConfig({
     proxy: {
       "/search": "http://localhost:5555",
       "/health": "http://localhost:5555",
+      "/stats": "http://localhost:5555",
     },
   },
 })
