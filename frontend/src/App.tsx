@@ -143,12 +143,12 @@ const TWEETS = [
 
 function SearchSuggestions({ onSearch }: { onSearch: (q: string) => void }) {
   return (
-    <div className="flex flex-wrap justify-center gap-2 mt-4">
+    <div className="flex flex-wrap justify-center gap-2 mt-6">
       {EXAMPLE_SEARCHES.map((q) => (
         <button
           key={q}
           onClick={() => onSearch(q)}
-          className="px-3 py-1.5 rounded-full border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/50 text-sm transition-colors"
+          className="px-4 py-2 rounded-full border border-purple-200 dark:border-purple-800 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-950/50 hover:border-purple-400 dark:hover:border-purple-600 text-sm transition-all duration-200 hover:shadow-sm"
         >
           {q}
         </button>
@@ -164,44 +164,51 @@ function Hero({ stats }: { stats: Stats | null }) {
   return (
     <div className="border-t">
       {/* Quotes */}
-      <section className="min-h-[50vh] flex items-center border-b">
-        <div className="max-w-lg mx-auto px-4 py-16 space-y-8 text-center">
-          <p className="text-xl italic text-muted-foreground">
-            "Ever searched GitHub for a project you <span className="text-foreground font-medium">knew existed</span> but couldn't find?"
-          </p>
-          <p className="text-xl italic text-muted-foreground">
-            "You remember the concept, maybe a few keywords, but GitHub search returns <span className="text-foreground font-medium">nothing</span>."
-          </p>
-          <p className="text-lg text-muted-foreground pt-4">
-            I faced the same problem, so I created a vectorized GitHub search. I believe we can find many great ideas and hidden gems — projects that aren't famous yet but already have proper READMEs.
-          </p>
+      <section className="min-h-[50vh] flex items-center border-b bg-gradient-to-b from-purple-50/50 to-transparent dark:from-purple-950/20 dark:to-transparent">
+        <div className="max-w-xl mx-auto px-4 py-20 space-y-6 text-center">
+          <div className="space-y-4">
+            <p className="text-xl italic text-muted-foreground leading-relaxed">
+              "Ever searched GitHub for a project you <span className="text-foreground font-medium">knew existed</span> but couldn't find?"
+            </p>
+            <p className="text-xl italic text-muted-foreground leading-relaxed">
+              "You remember the concept, maybe a few keywords, but GitHub search returns <span className="text-foreground font-medium">nothing</span>."
+            </p>
+          </div>
+          <div className="pt-6 border-t border-border/50">
+            <p className="text-base text-foreground/80 leading-relaxed">
+              I faced the same problem, so I created a vectorized GitHub search. I believe we can find many great ideas and hidden gems — projects that aren't famous yet but already have proper READMEs.
+            </p>
+            <p className="text-sm text-muted-foreground mt-4">— Tamas</p>
+          </div>
         </div>
       </section>
 
       {/* Dev section */}
       <section className="min-h-[50vh] flex items-center border-b bg-slate-50 dark:bg-slate-900/50">
-        <div className="max-w-2xl mx-auto px-4 py-16 w-full">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground mb-6 text-center">For developers</p>
+        <div className="max-w-2xl mx-auto px-4 py-20 w-full">
+          <p className="text-xs uppercase tracking-widest text-purple-600 dark:text-purple-400 mb-8 text-center font-medium">For developers</p>
 
           {/* Stats */}
-          <div className="text-center mb-10">
-            <p className="text-4xl font-bold">{repoCount}</p>
-            <p className="text-muted-foreground text-sm mt-1">README files embedded with <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs">qwen3-embedding-8b</code></p>
+          <div className="text-center mb-12">
+            <p className="text-5xl font-bold bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent">{repoCount}</p>
+            <p className="text-muted-foreground text-sm mt-2">README files embedded with <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-medium">qwen3-embedding-8b</code></p>
           </div>
 
           {/* MCP install */}
-          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-3 overflow-x-auto">
-            <p className="text-slate-500"># Add to Claude Code</p>
-            <p className="text-green-400">claude mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
-          </div>
-          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-6 overflow-x-auto">
-            <p className="text-slate-500"># Add to OpenCode</p>
-            <p className="text-green-400">opencode mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
+          <div className="space-y-3 mb-8">
+            <div className="bg-slate-900 dark:bg-slate-950 rounded-xl p-4 font-mono text-sm overflow-x-auto shadow-lg">
+              <p className="text-slate-500 text-xs mb-1"># Add to Claude Code</p>
+              <p className="text-green-400">claude mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
+            </div>
+            <div className="bg-slate-900 dark:bg-slate-950 rounded-xl p-4 font-mono text-sm overflow-x-auto shadow-lg">
+              <p className="text-slate-500 text-xs mb-1"># Add to OpenCode</p>
+              <p className="text-green-400">opencode mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
+            </div>
           </div>
 
           {/* curl example */}
-          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-10 overflow-x-auto">
-            <p className="text-slate-500"># Or search from your terminal</p>
+          <div className="bg-slate-900 dark:bg-slate-950 rounded-xl p-4 font-mono text-sm overflow-x-auto shadow-lg">
+            <p className="text-slate-500 text-xs mb-1"># Or search from your terminal</p>
             <p className="text-green-400">curl <span className="text-slate-300">-s "https://github-vec.com/search?q=fast+rust+terminal"</span></p>
           </div>
         </div>
@@ -252,12 +259,12 @@ function HeroHeader({ stats }: { stats: Stats | null }) {
   const repoCount = stats ? formatRepoCount(stats.repos * 5) : "...";
 
   return (
-    <div className="text-center mb-6">
-      <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent">
+    <div className="text-center mb-8">
+      <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-purple-600 via-blue-500 to-purple-600 bg-clip-text text-transparent">
         Find repos by meaning
       </h1>
-      <p className="text-muted-foreground">
-        Semantic search across {repoCount} GitHub repositories
+      <p className="text-lg text-muted-foreground">
+        Semantic search across <span className="font-semibold text-foreground">{repoCount}</span> GitHub repositories
       </p>
     </div>
   );
@@ -351,14 +358,14 @@ export default function App() {
       {/* Header + Search */}
       <div className={`max-w-2xl mx-auto px-4 flex flex-col justify-center ${showLanding ? 'min-h-[85vh]' : 'pt-16 pb-8'}`}>
         {showLanding && <HeroHeader stats={stats} />}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+        <div className="relative group">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground group-focus-within:text-purple-500 transition-colors" />
           <Input
             type="text"
-            placeholder="Search across GitHub semantically..."
+            placeholder="Describe what you're looking for..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-11 h-12 text-lg"
+            className="pl-12 h-14 text-lg rounded-xl border-2 focus:border-purple-500 focus:ring-purple-500/20 shadow-sm"
             autoFocus
           />
         </div>
