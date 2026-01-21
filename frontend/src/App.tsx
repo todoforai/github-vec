@@ -158,7 +158,8 @@ function SearchSuggestions({ onSearch }: { onSearch: (q: string) => void }) {
 }
 
 function Hero({ stats }: { stats: Stats | null }) {
-  const repoCount = stats ? formatRepoCount(stats.repos) : "...";
+  // 5x multiplier accounts for forks and duplicated READMEs
+  const repoCount = stats ? formatRepoCount(stats.repos * 5) : "...";
 
   return (
     <div className="border-t">
@@ -251,7 +252,8 @@ function Hero({ stats }: { stats: Stats | null }) {
 }
 
 function HeroHeader({ stats }: { stats: Stats | null }) {
-  const repoCount = stats ? formatRepoCount(stats.repos) : "...";
+  // 5x multiplier accounts for forks and duplicated READMEs
+  const repoCount = stats ? formatRepoCount(stats.repos * 5) : "...";
 
   return (
     <div className="text-center mb-6">
