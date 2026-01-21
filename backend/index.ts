@@ -118,6 +118,7 @@ async function search(query: string, limit: number, includeContent: boolean): Pr
 
 Bun.serve({
   port: process.env.PORT || 5555,
+  idleTimeout: 60, // 60 seconds for slow embedding calls
 
   async fetch(req) {
     const url = new URL(req.url);
