@@ -189,24 +189,16 @@ function Hero({ stats }: { stats: Stats | null }) {
             <p className="text-muted-foreground text-sm mt-1">README files embedded with <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs">qwen3-embedding-8b</code></p>
           </div>
 
-          {/* Code example */}
-          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-10 overflow-x-auto">
-            <p className="text-slate-500"># Search from your terminal</p>
-            <p className="text-green-400">curl <span className="text-slate-300">-s "https://github-vec.com/search?q=fast+rust+terminal"</span></p>
+          {/* MCP install */}
+          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-6 overflow-x-auto">
+            <p className="text-slate-500"># Add to Claude Code</p>
+            <p className="text-green-400">claude mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
           </div>
 
-          {/* Coming soon features */}
-          <div className="flex flex-wrap justify-center gap-4">
-            <div className="px-5 py-4 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
-              <span className="text-[10px] uppercase tracking-wider text-purple-600 dark:text-purple-400">Coming soon</span>
-              <p className="font-mono font-semibold mt-1">/github-vec</p>
-              <p className="text-xs text-muted-foreground mt-1">Claude Code skill</p>
-            </div>
-            <div className="px-5 py-4 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-              <span className="text-[10px] uppercase tracking-wider text-blue-600 dark:text-blue-400">Coming soon</span>
-              <p className="font-mono font-semibold mt-1">MCP Server</p>
-              <p className="text-xs text-muted-foreground mt-1">Model Context Protocol</p>
-            </div>
+          {/* curl example */}
+          <div className="bg-slate-900 dark:bg-slate-950 rounded-lg p-4 font-mono text-sm mb-10 overflow-x-auto">
+            <p className="text-slate-500"># Or search from your terminal</p>
+            <p className="text-green-400">curl <span className="text-slate-300">-s "https://github-vec.com/search?q=fast+rust+terminal"</span></p>
           </div>
         </div>
       </section>
