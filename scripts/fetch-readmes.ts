@@ -4,7 +4,7 @@ import { parseArgs } from "util";
 
 const MIN_SIZE = 500;
 const MAX_CHARS = 50000;
-const CONCURRENCY = 3000;
+const CONCURRENCY = 1000;
 const MAX_RETRIES = 5;
 const TIMEOUT = 10000;
 const BAD_PROXY_PENALTY = 15000;
@@ -198,7 +198,24 @@ async function fetchAndSave(
   const repo = match[1].replace(/\.git$/, "");
   const repoFile = repo.replace("/", "_");
 
-  if (existingRepos.has(repoFile) || errorRepos.has(repoFile)) {
+  // Skip repos with absurdly long names (filesystem limit is 255)
+  if (repoFile.length > 200) {
+    stats.skipped++;
+    stats.processed++;
+    return;
+  }
+
+  // Check if already processed (use sets if available, otherwise check filesystem)
+  let alreadyDone = existingRepos.has(repoFile) || errorRepos.has(repoFile);
+  if (!alreadyDone && existingRepos.size === 0 && errorRepos.size === 0) {
+    // Parallel instance: check filesystem directly
+    const existsSuccess = await Bun.file(`${outputDir}/${repoFile}_master_README.md`).exists() ||
+                          await Bun.file(`${outputDir}/${repoFile}_main_README.md`).exists();
+    const existsError = await Bun.file(`${errorsDir}/404_1/${repoFile}`).exists();
+    alreadyDone = existsSuccess || existsError;
+  }
+
+  if (alreadyDone) {
     stats.skipped++;
     stats.processed++;
     // Print progress for skipped items too
@@ -291,20 +308,21 @@ async function main() {
     }
   }
 
+  const minDate = values["min-date"] || "2023-01-01";
+  const limit = values.limit ? parseInt(values.limit) : null;
+  const offset = parseInt(values.offset || "0");
+
   const outputDir = process.env.READMES_DIR || "/home/root/data/readmes";
   const errorsDir = `${outputDir}/.errors`;
   await Bun.$`mkdir -p ${outputDir} ${errorsDir}`.quiet();
 
-  // Use DuckDB with persistent file
+  // Use DuckDB - persistent for main instance, in-memory for parallel instances
   const dbPath = `${outputDir}/.fetch-cache.duckdb`;
-  const db = new Database(dbPath);
+  const isParallel = offset > 0;
+  const db = isParallel ? new Database(":memory:") : new Database(dbPath);
   const parquetFile = values.full
     ? "/home/root/data/github_visits_full.parquet"
     : "/home/root/data/github_visits_6k.parquet";
-
-  const minDate = values["min-date"] || "2023-01-01";
-  const limit = values.limit ? parseInt(values.limit) : null;
-  const offset = parseInt(values.offset || "0");
 
   // Get total count first
   const countResult = await new Promise<any[]>((resolve, reject) => {
@@ -322,31 +340,35 @@ async function main() {
     console.log(`Starting at offset: ${offset.toLocaleString()}`);
   }
 
-  // Pre-scan existing files
-  console.log("Scanning existing files...");
+  // Pre-scan existing files (skip for parallel instances to save ~5GB RAM)
   const existingRepos = new Set<string>();
   const errorRepos = new Set<string>();
 
-  for await (const file of new Bun.Glob("*").scan(outputDir)) {
-    if (!file.startsWith(".")) {
-      const parts = file.split("_");
-      if (parts.length >= 3) {
-        existingRepos.add(parts.slice(0, -2).join("_"));
+  if (!isParallel) {
+    console.log("Scanning existing files...");
+    for await (const file of new Bun.Glob("*").scan(outputDir)) {
+      if (!file.startsWith(".")) {
+        const parts = file.split("_");
+        if (parts.length >= 3) {
+          existingRepos.add(parts.slice(0, -2).join("_"));
+        }
       }
     }
+
+    try {
+      const { readdirSync } = await import("fs");
+      for (const statusDir of readdirSync(errorsDir)) {
+        const statusPath = `${errorsDir}/${statusDir}`;
+        for (const file of readdirSync(statusPath)) {
+          errorRepos.add(file);
+        }
+      }
+    } catch {}
+
+    console.log(`  ${existingRepos.size.toLocaleString()} existing, ${errorRepos.size.toLocaleString()} errors\n`);
+  } else {
+    console.log("Skipping file scan (parallel instance)\n");
   }
-
-  try {
-    const { readdirSync } = await import("fs");
-    for (const statusDir of readdirSync(errorsDir)) {
-      const statusPath = `${errorsDir}/${statusDir}`;
-      for (const file of readdirSync(statusPath)) {
-        errorRepos.add(file);
-      }
-    }
-  } catch {}
-
-  console.log(`  ${existingRepos.size.toLocaleString()} existing, ${errorRepos.size.toLocaleString()} errors\n`);
 
   const stats: Stats = {
     success: 0,
@@ -383,7 +405,21 @@ async function main() {
     );
   });
 
-  if (!tableExists) {
+  if (isParallel) {
+    // Parallel instance: create small table with just our slice (saves ~20GB RAM)
+    const sliceEnd = limit ? offset + limit : offset + 10000000;
+    console.log(`Creating slice table for range ${offset.toLocaleString()}-${sliceEnd.toLocaleString()}...`);
+    await new Promise<void>((resolve, reject) => {
+      db.exec(
+        `CREATE TABLE ${tableName} AS
+         SELECT * FROM (
+           SELECT ROW_NUMBER() OVER () as id, origin
+           FROM '${parquetFile}' WHERE date >= '${minDate}'
+         ) WHERE id > ${offset} AND id <= ${sliceEnd}`,
+        (err) => (err ? reject(err) : resolve())
+      );
+    });
+  } else if (!tableExists) {
     console.log(`Creating indexed table ${tableName}...`);
     await new Promise<void>((resolve, reject) => {
       db.exec(
@@ -405,6 +441,9 @@ async function main() {
     );
   });
 
+  // Use unique progress key for parallel instances
+  const progressKey = isParallel ? `${tableName}_${offset}` : tableName;
+
   // Get total count from table
   const tableCount = await new Promise<number>((resolve, reject) => {
     db.all(`SELECT COUNT(*) as cnt FROM ${tableName}`, (err, rows: any[]) => {
@@ -414,10 +453,10 @@ async function main() {
   });
   console.log(`Table ${tableName} has ${tableCount.toLocaleString()} URLs`);
 
-  // Load saved progress or use offset arg
+  // Load saved progress
   const savedProgress = await new Promise<number>((resolve, reject) => {
     db.all(
-      `SELECT last_id FROM progress WHERE table_name = '${tableName}'`,
+      `SELECT last_id FROM progress WHERE table_name = '${progressKey}'`,
       (err, rows: any[]) => {
         if (err) reject(err);
         else resolve(rows.length > 0 ? Number(rows[0].last_id) : 0);
@@ -427,11 +466,11 @@ async function main() {
 
   // Process in batches using indexed id (fast seek, no scan)
   const BATCH_SIZE = 50000;
-  let currentId = offset > 0 ? offset : savedProgress;
-  if (savedProgress > 0 && offset === 0) {
+  let currentId = Math.max(offset, savedProgress);
+  if (savedProgress > offset) {
     console.log(`Resuming from saved progress: ${savedProgress.toLocaleString()}`);
   }
-  const endId = limit ? currentId + limit : tableCount;
+  const endId = limit ? offset + limit : tableCount;
 
   while (currentId < endId) {
     const batchLimit = Math.min(BATCH_SIZE, endId - currentId);
@@ -458,13 +497,15 @@ async function main() {
       }
 
       // Start task and track it
-      const task = processUrl(url).then(() => {
-        inFlight.delete(task);
-        if (resolveWaiter) {
-          resolveWaiter();
-          resolveWaiter = null;
-        }
-      });
+      const task = processUrl(url)
+        .catch((e) => console.error(`\n[FATAL] ${url}: ${e.message}`))
+        .then(() => {
+          inFlight.delete(task);
+          if (resolveWaiter) {
+            resolveWaiter();
+            resolveWaiter = null;
+          }
+        });
       inFlight.add(task);
     }
 
@@ -473,7 +514,7 @@ async function main() {
     // Save progress
     await new Promise<void>((resolve, reject) => {
       db.exec(
-        `INSERT OR REPLACE INTO progress (table_name, last_id) VALUES ('${tableName}', ${currentId})`,
+        `INSERT OR REPLACE INTO progress (table_name, last_id) VALUES ('${progressKey}', ${currentId})`,
         (err) => (err ? reject(err) : resolve())
       );
     });

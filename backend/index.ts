@@ -4,6 +4,21 @@ import { embed } from "./embed";
 const COLLECTION = "github_readmes_qwen_4k";
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333" });
 
+// Stats cache (1 hour TTL)
+let statsCache: { count: number; cachedAt: number } | null = null;
+const STATS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+async function getStats(): Promise<{ count: number; cachedAt: number }> {
+  const now = Date.now();
+  if (statsCache && now - statsCache.cachedAt < STATS_CACHE_TTL) {
+    return statsCache;
+  }
+
+  const info = await qdrant.getCollection(COLLECTION);
+  statsCache = { count: info.points_count ?? 0, cachedAt: now };
+  return statsCache;
+}
+
 // Rate limiting config
 const ANON_LIMIT = 10; // requests per minute
 const WINDOW_MS = 60_000; // 1 minute
@@ -111,6 +126,15 @@ Bun.serve({
     // Health check - no rate limit
     if (path === "/health") {
       return Response.json({ status: "ok" });
+    }
+
+    // Stats endpoint - no rate limit, cached
+    if (path === "/stats") {
+      const stats = await getStats();
+      return Response.json({
+        repos: stats.count,
+        cachedAt: new Date(stats.cachedAt).toISOString(),
+      });
     }
 
     // Rate limit check for all other endpoints
