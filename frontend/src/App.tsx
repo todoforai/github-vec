@@ -370,17 +370,6 @@ export default function App() {
           />
         </div>
         {showLanding && <SearchSuggestions onSearch={setQuery} />}
-        {showLanding && (
-          <div className="mt-8 p-4 rounded-lg border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/30 text-center">
-            <p className="text-yellow-700 dark:text-yellow-400 font-semibold">
-              Database update in progress
-            </p>
-            <p className="text-yellow-600/80 dark:text-yellow-400/80 text-sm mt-2">
-              We're indexing 300M+ GitHub repositories. Current results may be incomplete.<br />
-              Follow progress on <a href="https://x.com/HavlikTamas" target="_blank" rel="noopener noreferrer" className="underline font-medium">@HavlikTamas</a>
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Landing sections - full width */}
