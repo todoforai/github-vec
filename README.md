@@ -6,9 +6,30 @@ GitHub READMEs, vectorized.
 >
 > *"You remember the concept, maybe a few keywords, but GitHub search returns nothing."*
 
-I got frustrated enough to embed 2.3M GitHub READMEs into a vector database. Now you can search by *meaning*, not just keywords.
+I got frustrated enough to embed 23M unique GitHub READMEs into a vector database. Now you can search by *meaning*, not just keywords.
 
 Designed to work with claude-code subagents, keeping contexts lean.
+
+## MCP Server
+
+Add to your Claude Code config (`~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "github-vec": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "github:todoforai/github-vec-mcp"]
+    }
+  }
+}
+```
+
+Or run directly:
+```bash
+npx -y github:todoforai/github-vec-mcp
+```
 
 ## Why use this
 
@@ -51,8 +72,8 @@ To sync local storage to production (stops remote Qdrant, rsyncs, restarts):
 
 | Property | Value |
 |----------|-------|
-| Records | 2,342,435 unique READMEs |
-| Size | ~4.8 GB |
+| Records | 23M unique READMEs (100M+ with forks) |
+| Size | ~350 GB |
 | Source | BigQuery `bigquery-public-data.github_repos` |
 
 Schema:

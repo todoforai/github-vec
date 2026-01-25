@@ -130,15 +130,8 @@ const EXAMPLE_SEARCHES = [
   "sync dotfiles across machines",
 ];
 
-const TWEETS = [
-  {
-    name: "Jarred Sumner",
-    handle: "jarredsumner",
-    avatar: "https://pbs.twimg.com/profile_images/1756372763072004096/YbKqFAcU_200x200.jpg",
-    text: "This is incredible - semantic search across 2.3M GitHub repos. Finally a way to find that library you vaguely remember.",
-    url: "https://twitter.com/jarredsumner",
-    date: "Jan 5",
-  },
+const X_EMBED_IDS = [
+  "2015532814075064540", // @HavlikTamas: Just created @GithubVec...
 ];
 
 function SearchSuggestions({ onSearch }: { onSearch: (q: string) => void }) {
@@ -152,6 +145,47 @@ function SearchSuggestions({ onSearch }: { onSearch: (q: string) => void }) {
         >
           {q}
         </button>
+      ))}
+    </div>
+  );
+}
+
+declare global {
+  interface Window {
+    twttr?: {
+      widgets: {
+        load: (element?: HTMLElement) => void;
+      };
+    };
+  }
+}
+
+function XEmbeds({ ids }: { ids: string[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Load Twitter widgets script
+    const script = document.createElement("script");
+    script.src = "https://platform.twitter.com/widgets.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.twttr && containerRef.current) {
+        window.twttr.widgets.load(containerRef.current);
+      }
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
+  return (
+    <div ref={containerRef} className="space-y-4 flex flex-col items-center [&_twitter-widget]:!max-w-full">
+      {ids.map((id) => (
+        <blockquote key={id} className="twitter-tweet" data-theme="dark">
+          <a href={`https://twitter.com/x/status/${id}`}>Loading...</a>
+        </blockquote>
       ))}
     </div>
   );
@@ -198,11 +232,11 @@ function Hero({ stats }: { stats: Stats | null }) {
           <div className="space-y-3 mb-8">
             <div className="bg-slate-900 dark:bg-slate-950 rounded-xl p-4 font-mono text-sm overflow-x-auto shadow-lg">
               <p className="text-slate-500 text-xs mb-1"># Add to Claude Code</p>
-              <p className="text-green-400">claude mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
+              <p className="text-green-400">claude mcp add github-vec -- <span className="text-slate-300">npx -y github:todoforai/github-vec-mcp</span></p>
             </div>
             <div className="bg-slate-900 dark:bg-slate-950 rounded-xl p-4 font-mono text-sm overflow-x-auto shadow-lg">
               <p className="text-slate-500 text-xs mb-1"># Add to OpenCode</p>
-              <p className="text-green-400">opencode mcp add github-vec -- <span className="text-slate-300">bunx --bun github:todoforai/github-vec/mcp</span></p>
+              <p className="text-green-400">opencode mcp add github-vec -- <span className="text-slate-300">npx -y github:todoforai/github-vec-mcp</span></p>
             </div>
           </div>
 
@@ -214,39 +248,11 @@ function Hero({ stats }: { stats: Stats | null }) {
         </div>
       </section>
 
-      {/* Tweets */}
+      {/* X Mentions */}
       <section className="min-h-[50vh] flex items-center">
         <div className="max-w-lg mx-auto px-4 py-16 w-full">
           <p className="text-center text-xs uppercase tracking-wider text-muted-foreground mb-8">What people are saying</p>
-          {TWEETS.map((tweet) => (
-            <a
-              key={tweet.handle}
-              href={tweet.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block p-4 rounded-lg border bg-card hover:border-foreground/20 transition-colors"
-            >
-              <div className="flex gap-3">
-                <img
-                  src={tweet.avatar}
-                  alt={tweet.name}
-                  className="w-10 h-10 rounded-full"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 text-sm">
-                    <span className="font-semibold">{tweet.name}</span>
-                    <span className="text-muted-foreground text-xs">@{tweet.handle}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-muted-foreground text-xs">{tweet.date}</span>
-                    <svg className="w-4 h-4 ml-auto text-muted-foreground" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                    </svg>
-                  </div>
-                  <p className="text-sm mt-2 text-muted-foreground">{tweet.text}</p>
-                </div>
-              </div>
-            </a>
-          ))}
+          <XEmbeds ids={X_EMBED_IDS} />
         </div>
       </section>
 
@@ -346,7 +352,7 @@ export default function App() {
     <div className="min-h-screen bg-background">
       <div className="fixed top-4 right-4 flex items-center gap-1 z-10">
         <Button variant="ghost" size="icon" asChild>
-          <a href="https://github.com/sixzero/github-vec" target="_blank" rel="noopener noreferrer">
+          <a href="https://github.com/todoforai/github-vec" target="_blank" rel="noopener noreferrer">
             <Github className="h-5 w-5" />
           </a>
         </Button>
