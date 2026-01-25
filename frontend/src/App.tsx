@@ -266,7 +266,7 @@ function HeroHeader({ stats }: { stats: Stats | null }) {
 
   return (
     <div className="text-center mb-8">
-      <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-purple-600 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+      <h1 className="text-5xl font-bold mb-3 pb-1 leading-relaxed overflow-visible bg-gradient-to-r from-purple-600 via-blue-500 to-purple-600 bg-clip-text text-transparent">
         Find repos by meaning
       </h1>
       <p className="text-lg text-muted-foreground">
