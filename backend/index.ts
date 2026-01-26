@@ -1,8 +1,48 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
+import { Glob } from "bun";
 import { embed } from "./embed";
 
 const COLLECTION = "github_readmes_qwen_4k";
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333" });
+const DATA_DIR = process.env.DATA_DIR || "/home/root/data";
+const READMES_DIR = `${DATA_DIR}/readmes`;
+
+// Cache repo -> filename mapping
+let readmeIndex: Map<string, string> | null = null;
+
+async function buildReadmeIndex(): Promise<Map<string, string>> {
+  if (readmeIndex) return readmeIndex;
+
+  const index = new Map<string, string>();
+  const glob = new Glob("*");
+
+  for await (const file of glob.scan(READMES_DIR)) {
+    // Parse: owner_repo_branch_README.md -> owner/repo
+    const parts = file.split("_");
+    const branchIdx = parts.findIndex(p => ["main", "master", "HEAD", "default"].includes(p));
+    if (branchIdx >= 2) {
+      const owner = parts[0];
+      const repo = parts.slice(1, branchIdx).join("_");
+      index.set(`${owner}/${repo}`, file);
+    }
+  }
+
+  readmeIndex = index;
+  console.log(`Indexed ${index.size} readmes`);
+  return index;
+}
+
+async function getReadmeContent(repoName: string): Promise<string | null> {
+  const index = await buildReadmeIndex();
+  const filename = index.get(repoName);
+  if (!filename) return null;
+
+  try {
+    return await Bun.file(`${READMES_DIR}/${filename}`).text();
+  } catch {
+    return null;
+  }
+}
 
 // Stats cache (1 hour TTL)
 let statsCache: { count: number; cachedAt: number } | null = null;
@@ -103,17 +143,17 @@ async function search(query: string, limit: number, includeContent: boolean): Pr
     with_payload: true,
   });
 
-  return results.map(r => {
-    const payload = r.payload as { repo_name: string; content: string };
+  return Promise.all(results.map(async (r) => {
+    const payload = r.payload as { repo_name: string };
     const result: SearchResult = {
       score: r.score,
       repo: payload.repo_name,
     };
     if (includeContent) {
-      result.content = payload.content;
+      result.content = await getReadmeContent(payload.repo_name) || undefined;
     }
     return result;
-  });
+  }));
 }
 
 Bun.serve({
@@ -164,3 +204,6 @@ Bun.serve({
 });
 
 console.log(`Server running on http://localhost:${process.env.PORT || 5555}`);
+
+// Pre-build readme index on startup
+buildReadmeIndex().catch(console.error);

@@ -1,8 +1,16 @@
 {
   "name": "github-vec",
+  "version": "1.0.0",
+  "description": "Semantic search across GitHub repositories",
   "module": "index.ts",
   "type": "module",
-  "private": true,
+  "bin": {
+    "github-vec": "src/index.ts"
+  },
+  "files": [
+    "src",
+    "plugin"
+  ],
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.7",

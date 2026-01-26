@@ -12,7 +12,8 @@ const BAD_PROXY_PENALTY = 15000;
 let activeConnections = 0;
 let penalizedCount = 0;
 
-const BRANCHES = ["master", "main"];  // master is 70%, main is 19%
+// const BRANCHES = ["master", "main"];  // master is 70%, main is 19%
+const BRANCHES = ["HEAD"];  // HEAD resolves to default branch automatically
 // Ordered by frequency - README.md covers 89% of repos
 const README_NAMES = [
   "README.md",       // 70% master + 19% main = 89%
@@ -209,7 +210,8 @@ async function fetchAndSave(
   let alreadyDone = existingRepos.has(repoFile) || errorRepos.has(repoFile);
   if (!alreadyDone && existingRepos.size === 0 && errorRepos.size === 0) {
     // Parallel instance: check filesystem directly
-    const existsSuccess = await Bun.file(`${outputDir}/${repoFile}_master_README.md`).exists() ||
+    const existsSuccess = await Bun.file(`${outputDir}/${repoFile}_HEAD_README.md`).exists() ||
+                          await Bun.file(`${outputDir}/${repoFile}_master_README.md`).exists() ||
                           await Bun.file(`${outputDir}/${repoFile}_main_README.md`).exists();
     const existsError = await Bun.file(`${errorsDir}/404_1/${repoFile}`).exists();
     alreadyDone = existsSuccess || existsError;
