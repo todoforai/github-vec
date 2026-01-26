@@ -7,22 +7,11 @@ const DATA_DIR = process.env.DATA_DIR || "/home/root/data";
 const READMES_DIR = `${DATA_DIR}/readmes`;
 
 async function getReadmeContent(repoName: string): Promise<string | null> {
-  // owner/repo -> owner_repo
   const base = repoName.replace("/", "_");
 
-  // Try different branch/readme combinations
-  const candidates = [
-    `${base}_HEAD_README.md`,
-    `${base}_master_README.md`,
-    `${base}_main_README.md`,
-  ];
-
-  for (const filename of candidates) {
+  for (const branch of ["HEAD", "master", "main"]) {
     try {
-      const file = Bun.file(`${READMES_DIR}/${filename}`);
-      if (await file.exists()) {
-        return await file.text();
-      }
+      return await Bun.file(`${READMES_DIR}/${base}_${branch}_README.md`).text();
     } catch {}
   }
   return null;
