@@ -1,5 +1,6 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { embed } from "./embed";
+import { generateHypotheticalDoc } from "./hyde";
 
 const COLLECTION = "github_readmes_qwen_4k";
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333" });
@@ -170,6 +171,36 @@ Bun.serve({
       const includeContent = path === "/search/full";
       const results = await search(q, limit, includeContent);
       return Response.json({ query: q, results }, { headers });
+    }
+
+    if (path === "/search/hyde") {
+      const q = url.searchParams.get("q");
+      const limit = parseInt(url.searchParams.get("limit") || "10");
+
+      if (!q) {
+        return Response.json({ error: "Missing ?q= parameter" }, { status: 400, headers });
+      }
+
+      const hypotheticalDoc = await generateHypotheticalDoc(q);
+      const vector = await embed(hypotheticalDoc);
+      const results = await qdrant.search(COLLECTION, {
+        vector,
+        limit,
+        with_payload: true,
+      });
+
+      const mapped = await Promise.all(
+        results.map(async (r) => {
+          const payload = r.payload as { repo_name: string };
+          return {
+            score: r.score,
+            repo: payload.repo_name,
+            content: await getReadmeContent(payload.repo_name) || undefined,
+          };
+        })
+      );
+
+      return Response.json({ query: q, hypotheticalDoc, results: mapped }, { headers });
     }
 
     return Response.json({ error: "Not found" }, { status: 404 });
