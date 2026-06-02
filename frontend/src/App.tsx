@@ -266,6 +266,10 @@ function HeroHeader({ stats }: { stats: Stats | null }) {
 
   return (
     <div className="text-center mb-8">
+      <div className="mb-6 mx-auto max-w-2xl rounded-lg border border-amber-400/40 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+        <strong>Service paused.</strong> github-vec is currently offline. If you found this useful, drop a line to{" "}
+        <a href="mailto:marcellhavlik@todofor.ai" className="underline font-medium">marcellhavlik@todofor.ai</a> and I'll consider bringing it back.
+      </div>
       <h1 className="text-5xl font-bold mb-3 pb-1 leading-relaxed overflow-visible bg-gradient-to-r from-purple-600 via-blue-500 to-purple-600 bg-clip-text text-transparent">
         Find repos by meaning
       </h1>
